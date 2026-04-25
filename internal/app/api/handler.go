@@ -64,7 +64,11 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	if resp.Inbound == nil {
+		writeJSON(w, http.StatusOK, resp.Outbound)
+	} else {
+		writeJSON(w, http.StatusOK, resp)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
