@@ -193,66 +193,34 @@ automatically.
 
 ## Design notes
 
-**Separation of concerns.** Each layer has one job: providers fetch+normalize,
-aggregator handles fan-out and transient failures, filter/sort/rank operate on
-the unified model, service orchestrates, API translates HTTP. A new provider
-needs one file in `internal/pkg/providers/`; nothing else changes.
+**Separation of concerns.** The codebase is split into thin, single-responsibility layers: providers own HTTP transport and normalization, the aggregator owns fan-out and resilience, filter/ranker own result presentation, the service orchestrates them, and the API handler owns HTTP encoding. Adding a new provider requires one file in `internal/pkg/providers/` and one handler in `internal/pkg/airlinemock/` — nothing else changes.
 
-**Data inconsistency handling.** Each provider ships its own time format:
-- AirAsia: RFC3339 with colon offset (`+07:00`)
-- Batik Air: compact offset (`+0700`)
-- Garuda: RFC3339
-- Lion Air: naive datetime + named IANA timezone
+**Data inconsistency handling.** Each provider ships a different time format: Garuda uses RFC3339, Batik Air uses a compact numeric offset (`+0700`), AirAsia uses RFC3339 with colon offset (`+07:00`), and Lion Air uses naive local datetime strings paired with a named IANA timezone. Each normalizer parses its own format and converts to RFC3339 + Unix timestamp. When a provider's top-level arrival field contradicts its segment chain (e.g. Garuda's `GA315` lists `arrival.airport: SUB` but the segments terminate at `DPS`), the normalizer discards the top-level field and rebuilds departure, arrival, and stop count directly from the segment chain. Wall-clock duration computed from timestamps is always preferred over the provider-supplied `duration_minutes`, `flight_time`, or `travel_time` fields, which may contain timezone-accounting errors. Every normalized flight is passed through `Flight.Validate()` — checking that arrival is after departure, price and duration are positive, and stops are non-negative — and silently dropped if it fails.
 
-Normalizers convert all to RFC3339 with a Unix timestamp. When a flight's
-top-level fields contradict nested segment data (e.g. Garuda's `GA315` shows
-`arrival.airport: SUB` but its `segments[]` terminate at `DPS`), the
-normalizer rebuilds departure/arrival/stops from the segment chain. Wall-clock
-duration (derived from timestamps) is preferred over the provider-supplied
-`duration_minutes` / `flight_time` / `travel_time` fields to absorb
-TZ-accounting mistakes in the source data.
+**Parallelism + resilience.** `Aggregator.Aggregate` launches one goroutine per provider using a `sync.WaitGroup`. Each goroutine runs under a separate per-provider context with a 2 s timeout, so a slow provider cannot block results from the others. Failed calls are retried up to 2 times using exponential backoff with full jitter, and the retry loop short-circuits immediately on context cancellation or deadline exceeded. AirAsia's 10% HTTP 503 failure rate exercises this retry path on every run.
 
-Every normalized flight passes `Flight.Validate()`: arrival > departure,
-non-negative stops, positive price and duration. Invalid rows are dropped
-silently (a production build would emit a metric).
+**Rate limiting.** A token-bucket `Limiter` (20 rps, burst 10) is created per provider at startup and shared across all concurrent requests to that provider. Tokens are replenished continuously based on elapsed time, and `Wait` blocks until a token is available or the context is cancelled.
 
-**Parallelism + resilience.** `Aggregator.Aggregate` fans out one goroutine
-per provider. Per-provider context timeout (2s default) caps how long any one
-upstream can block. Exponential backoff with full jitter on retry (2 attempts
-default), cancelled eagerly when the parent context is done. AirAsia's
-10%-failure mock exercises this path.
+**Caching.** Raw aggregated results (before filtering and sorting) are cached under a key composed of `origin|destination|date|passengers|cabinClass|returnDate`. Filters and sort order are excluded from the key deliberately — two requests that differ only in presentation parameters share the same upstream fetch and apply their own presentation layer on top of the cached data. Default TTL is 30 s.
 
-**Rate limiting.** A token-bucket `Limiter` per provider caps outbound call
-rate (20 rps, burst 10 by default). Sharing one limiter per provider means
-bursts from concurrent search requests still get smoothed.
+**Dedup.** After aggregation, flights sharing the same airline IATA code, flight number, and departure day are collapsed to the single cheapest option. The key uses `departure.timestamp / 86400` (seconds per day) to normalize across timezone-aware timestamps.
 
-**Caching.** Search responses are cached by `(origin, destination, date,
-passengers, cabin, returnDate)`. Filters and sort are intentionally excluded
-so two requests with different UI filters share the same upstream fetch.
-Default TTL 30s; short because prices change.
+**Best-value ranking.** `ranker.Rank` min-max normalizes price, duration, and stops independently across the current result set, producing a 0–1 score for each dimension where 1 is best. The three scores are combined as a weighted sum (price 60%, duration 30%, stops 10%) and stored as `price.best_value_score`. Because normalization is relative, scores shift when filters reduce the result set — a filtered set recalculates against its own min/max.
 
-**Dedup.** After aggregation, flights with the same airline code + flight
-number + departure date are collapsed to the cheapest — satisfies the "compare
-prices across providers for the same flight" requirement.
+**IDR formatting.** `money.FormatIDR` formats amounts with dot thousands separators and an `Rp` prefix (e.g. `1250000` → `"Rp 1.250.000"`). The raw integer amount is always present alongside the formatted string so callers can sort or compare numerically.
 
-**Best-value ranking.** `ranker.Rank` builds a composite score from price
-(60%), duration (30%), and stops (10%) normalized against the current result
-set, giving a 0..1 score per flight. Exposed as `price.best_value_score` and
-usable via `sort_by: best_value`.
+## Bonus items
 
-**IDR formatting.** Prices are emitted both as a raw integer amount and a
-localized string (`"Rp 1.250.000"`).
+**Round-trip search.** When `returnDate` is set, the service calls `searchLeg` twice — once for the outbound leg and once with origin and destination swapped for the inbound leg. Both legs go through the full aggregation, dedup, cache, and presentation pipeline independently. The response wraps both as `outbound` and `inbound`.
 
-**Bonus items delivered:**
-- Best-value scoring
-- Round-trip (outbound + inbound response sections)
-- WIB/WITA/WIT handled via IANA names (`Asia/Jakarta` / `Asia/Makassar` /
-  `Asia/Jayapura`)
-- Per-provider token-bucket rate limiting
-- Exponential backoff with full jitter + retry
-- IDR thousands-separator formatting
-- Parallel provider queries with timeout
-- Graceful HTTP shutdown
+**Timezone handling.** Lion Air supplies naive datetime strings (no offset) paired with a named IANA timezone string such as `Asia/Jakarta`, `Asia/Makassar`, or `Asia/Jayapura`. The normalizer calls `time.ParseInLocation` with the resolved `*time.Location`, correctly handling WIB (UTC+7), WITA (UTC+8), and WIT (UTC+9). The airport lookup table provides a fallback timezone for any provider that omits it entirely.
 
-Note: multi-city search (the single-leg model covers it naturally
-as a sequence of one-way searches but the API surface isn't exposed).
+**Per-provider rate limiting.** Each provider gets its own token-bucket limiter so that burst traffic from concurrent search requests is smoothed independently per airline, preventing any single provider from being flooded.
+
+**Exponential backoff with retry.** Failed provider calls are retried with delays computed as `rand.Int63n(min(base << (attempt-1), max) + 1)` — full jitter over a doubling window, capped at 1 s. The retry loop is wired to the per-provider context so retries are abandoned as soon as the timeout fires.
+
+**Parallel provider queries with timeout.** All four providers are queried concurrently via goroutines. Each runs under a 2 s context deadline independent of the others, so the slowest provider (Batik Air at up to 400 ms) determines response time only in the worst case, not the sum of all provider latencies.
+
+**Graceful shutdown.** The main server listens for `SIGINT` / `SIGTERM` and calls `srv.Close()`, allowing in-flight requests to drain before the process exits.
+
+**Not implemented:** multi-city search. The single-leg model naturally supports it as a sequence of one-way searches, but the API surface to express an arbitrary city chain is not exposed.
