@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+// Limiter is a token-bucket rate limiter. It is safe for concurrent use
+// by multiple goroutines.
 type Limiter struct {
 	mu       sync.Mutex
 	tokens   float64
@@ -14,6 +16,8 @@ type Limiter struct {
 	last     time.Time
 }
 
+// NewLimiter creates a [Limiter] with the given burst capacity and sustained
+// rate in tokens per second. The bucket starts full.
 func NewLimiter(capacity int, rate float64) *Limiter {
 	return &Limiter{
 		tokens:   float64(capacity),
@@ -23,6 +27,8 @@ func NewLimiter(capacity int, rate float64) *Limiter {
 	}
 }
 
+// Wait blocks until a token is available or ctx is cancelled.
+// It returns ctx.Err() if the context is done before a token can be acquired.
 func (l *Limiter) Wait(ctx context.Context) error {
 	for {
 		l.mu.Lock()

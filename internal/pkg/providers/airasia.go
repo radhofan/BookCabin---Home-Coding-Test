@@ -10,6 +10,8 @@ import (
 	"bookcabin/internal/pkg/domain"
 )
 
+// AirAsia is the [Provider] adapter for AirAsia.
+// BaseURL must be the base URL of the AirAsia mock server (e.g. "http://127.0.0.1:PORT").
 type AirAsia struct{ BaseURL string }
 
 func (AirAsia) Name() string { return "AirAsia" }

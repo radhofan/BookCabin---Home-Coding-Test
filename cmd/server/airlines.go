@@ -11,6 +11,9 @@ import (
 	"bookcabin/internal/pkg/providers"
 )
 
+// startAirlineServers starts one HTTP server per airline on a random local port,
+// reads mock JSON data from test/testdata/, and returns the base URLs for use
+// by the provider HTTP clients. The servers run until the process exits.
 func startAirlineServers() (providers.URLs, error) {
 	garuda, err := os.ReadFile("test/testdata/garuda.json")
 	if err != nil {

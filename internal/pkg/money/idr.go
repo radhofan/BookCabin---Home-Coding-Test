@@ -1,3 +1,4 @@
+// Package money formats currency amounts for display.
 package money
 
 import (
@@ -5,6 +6,8 @@ import (
 	"strings"
 )
 
+// FormatIDR formats amount as an Indonesian Rupiah string with dot thousands
+// separators, e.g. 1250000 → "Rp 1.250.000". Negative amounts are prefixed with "-".
 func FormatIDR(amount int64) string {
 	neg := amount < 0
 	if neg {
@@ -29,6 +32,8 @@ func FormatIDR(amount int64) string {
 	return b.String()
 }
 
+// Format formats amount in the given currency. "IDR" uses [FormatIDR].
+// All other currencies are formatted as "<CURRENCY> <amount>".
 func Format(amount int64, currency string) string {
 	switch strings.ToUpper(currency) {
 	case "IDR":

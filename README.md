@@ -169,25 +169,10 @@ go test ./...
 go test -race ./...
 ```
 
-## Layout
+## Project Standards
 
 Follows the [golang-standards/project-layout](https://github.com/golang-standards/project-layout) convention.
-
-```
-cmd/server/               entry point — starts airline mock servers + main API
-internal/pkg/airlinemock/ HTTP handlers that simulate each airline (delay, failures)
-internal/pkg/providers/   HTTP clients for each airline + normalization logic
-internal/pkg/aggregator/  parallel fanout, exp-backoff retry, token-bucket rate limit, dedup
-internal/pkg/filter/      price/stops/airline/duration/time-window filters + sort
-internal/pkg/ranker/      "best value" scoring
-internal/pkg/cache/       TTL in-memory cache keyed on search params
-internal/pkg/domain/      unified Flight/SearchRequest models + validation
-internal/pkg/airport/     airport → city/TZ lookup
-internal/pkg/money/       IDR formatting
-internal/app/service/     orchestrator
-internal/app/api/         HTTP handler
-test/testdata/            mock airline JSON responses + assignment PDF
-```
+All doc comments follow the official [Go doc comment](https://go.dev/doc/comment) style.
 
 ## How the mock airline servers work
 

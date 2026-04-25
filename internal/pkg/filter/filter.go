@@ -1,3 +1,6 @@
+// Package filter applies client-side predicates and sort order to an aggregated
+// flight list. Filtering and sorting happen after aggregation and deduplication,
+// so they operate on the normalized [domain.Flight] type and never touch provider logic.
 package filter
 
 import (
@@ -7,6 +10,8 @@ import (
 	"bookcabin/internal/pkg/domain"
 )
 
+// Apply returns a new slice containing only the flights in flights that satisfy
+// every predicate in f. If f is nil, flights is returned unchanged.
 func Apply(flights []domain.Flight, f *domain.Filters) []domain.Flight {
 	if f == nil {
 		return flights
@@ -28,6 +33,7 @@ func Apply(flights []domain.Flight, f *domain.Filters) []domain.Flight {
 	return result
 }
 
+// matches reports whether fl satisfies all predicates in f.
 func matches(fl domain.Flight, f *domain.Filters, airlineSet map[string]struct{}) bool {
 	if f.MinPrice > 0 && fl.Price.Amount < f.MinPrice {
 		return false
@@ -59,6 +65,8 @@ func matches(fl domain.Flight, f *domain.Filters, airlineSet map[string]struct{}
 	return true
 }
 
+// inHourWindow reports whether the UTC hour of ts falls within w.
+// The window wraps midnight when w.ToHour < w.FromHour.
 func inHourWindow(ts int64, w domain.TimeWindow) bool {
 	h := time.Unix(ts, 0).UTC().Hour()
 	if w.FromHour <= w.ToHour {

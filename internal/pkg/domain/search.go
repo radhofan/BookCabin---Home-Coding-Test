@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// SortField names the field used to order search results.
 type SortField string
 
 const (
@@ -12,9 +13,11 @@ const (
 	SortDuration      SortField = "duration"
 	SortDepartureTime SortField = "departure_time"
 	SortArrivalTime   SortField = "arrival_time"
-	SortBestValue     SortField = "best_value"
+	// SortBestValue orders results by the composite best-value score computed by [ranker.Rank].
+	SortBestValue SortField = "best_value"
 )
 
+// SortOrder controls whether results are sorted ascending or descending.
 type SortOrder string
 
 const (
@@ -22,11 +25,16 @@ const (
 	SortDesc SortOrder = "desc"
 )
 
+// TimeWindow restricts flights to those departing or arriving within a range of hours.
+// Hours are in 24-hour format (0–23). If ToHour is less than FromHour the window
+// wraps midnight (e.g. FromHour=22, ToHour=2 matches 22:00–02:00).
 type TimeWindow struct {
 	FromHour int `json:"from_hour"`
 	ToHour   int `json:"to_hour"`
 }
 
+// Filters narrows the flight list returned by a search. All fields are optional;
+// a zero value means the corresponding filter is not applied.
 type Filters struct {
 	MinPrice        int64       `json:"min_price,omitempty"`
 	MaxPrice        int64       `json:"max_price,omitempty"`
@@ -37,6 +45,10 @@ type Filters struct {
 	ArrivalWindow   *TimeWindow `json:"arrival_window,omitempty"`
 }
 
+// SearchRequest is the body of a POST /search request.
+// Origin, Destination, DepartureDate, Passengers, and CabinClass are required.
+// Filters, SortBy, and SortOrder are optional and applied after aggregation.
+// Set ReturnDate to request a round-trip; omit it or set it to nil for one-way.
 type SearchRequest struct {
 	Origin        string    `json:"origin"`
 	Destination   string    `json:"destination"`
@@ -49,6 +61,8 @@ type SearchRequest struct {
 	SortOrder     SortOrder `json:"sort_order,omitempty"`
 }
 
+// Validate reports whether the request contains all required fields with valid values.
+// CabinClass defaults to "economy" when empty.
 func (r *SearchRequest) Validate() error {
 	if r.Origin == "" || r.Destination == "" {
 		return errors.New("origin and destination required")
@@ -76,6 +90,8 @@ func (r *SearchRequest) Validate() error {
 	return nil
 }
 
+// SearchCriteria echoes the core search parameters back in the response so callers
+// can confirm what was searched without re-parsing their request.
 type SearchCriteria struct {
 	Origin        string `json:"origin"`
 	Destination   string `json:"destination"`
@@ -84,6 +100,9 @@ type SearchCriteria struct {
 	CabinClass    string `json:"cabin_class"`
 }
 
+// Metadata contains diagnostic information about a completed search:
+// how many providers were contacted, how many succeeded, total result count,
+// elapsed time, and whether the response was served from cache.
 type Metadata struct {
 	TotalResults       int   `json:"total_results"`
 	ProvidersQueried   int   `json:"providers_queried"`
@@ -93,6 +112,8 @@ type Metadata struct {
 	CacheHit           bool  `json:"cache_hit"`
 }
 
+// SearchResponse is the result for a single flight leg.
+// It is embedded in [service.TripResponse] which wraps both outbound and inbound legs.
 type SearchResponse struct {
 	SearchCriteria SearchCriteria `json:"search_criteria"`
 	Metadata       Metadata       `json:"metadata"`

@@ -1,3 +1,6 @@
+// Package service orchestrates a flight search: it checks the cache, fans out
+// to providers via the aggregator, deduplicates results, applies presentation
+// logic (filtering, ranking, sorting, IDR formatting), and writes back to cache.
 package service
 
 import (
@@ -12,20 +15,28 @@ import (
 	"bookcabin/internal/pkg/ranker"
 )
 
+// Service orchestrates flight searches. It is safe for concurrent use by
+// multiple goroutines.
 type Service struct {
 	agg   *aggregator.Aggregator
 	cache *cache.Cache
 }
 
+// New creates a [Service] backed by the given aggregator and cache.
 func New(agg *aggregator.Aggregator, c *cache.Cache) *Service {
 	return &Service{agg: agg, cache: c}
 }
 
+// TripResponse is the top-level response returned by POST /search.
+// Inbound is non-nil only for round-trip requests.
 type TripResponse struct {
 	Outbound domain.SearchResponse  `json:"outbound"`
 	Inbound  *domain.SearchResponse `json:"inbound,omitempty"`
 }
 
+// Search validates req, searches for the outbound leg, and — when ReturnDate is
+// set — searches for the inbound leg with origin and destination swapped.
+// It returns a [TripResponse] containing one or both legs.
 func (s *Service) Search(ctx context.Context, req domain.SearchRequest) (TripResponse, error) {
 	if err := req.Validate(); err != nil {
 		return TripResponse{}, err
@@ -53,6 +64,10 @@ func (s *Service) Search(ctx context.Context, req domain.SearchRequest) (TripRes
 	return TripResponse{Outbound: outbound, Inbound: &inbound}, nil
 }
 
+// searchLeg performs a single-leg search: cache lookup → aggregation → dedup →
+// cache write → filter/rank/sort/format.
+// Raw (pre-presentation) flights are cached so that re-requests with different
+// filters still benefit from the cached upstream data.
 func (s *Service) searchLeg(ctx context.Context, req domain.SearchRequest) (domain.SearchResponse, error) {
 	start := time.Now()
 
@@ -111,6 +126,8 @@ func (s *Service) searchLeg(ctx context.Context, req domain.SearchRequest) (doma
 	return resp, nil
 }
 
+// applyPresentation filters, ranks, sorts, and formats a copy of in according
+// to the presentation options in req. It does not modify in.
 func applyPresentation(in []domain.Flight, req domain.SearchRequest) []domain.Flight {
 	flights := make([]domain.Flight, len(in))
 	copy(flights, in)

@@ -10,6 +10,8 @@ import (
 	"bookcabin/internal/pkg/domain"
 )
 
+// Garuda is the [Provider] adapter for Garuda Indonesia.
+// BaseURL must be the base URL of the Garuda mock server (e.g. "http://127.0.0.1:PORT").
 type Garuda struct{ BaseURL string }
 
 func (Garuda) Name() string { return "Garuda Indonesia" }

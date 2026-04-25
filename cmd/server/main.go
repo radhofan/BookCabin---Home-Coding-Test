@@ -1,3 +1,16 @@
+// BookCabin is the flight search and aggregation server.
+//
+// On startup it launches four mock airline HTTP servers (one per provider),
+// then listens for search requests on :8080. All airline servers run in the
+// same process on random local ports; their addresses are printed to stdout.
+//
+// Usage:
+//
+//	go run ./cmd/server
+//	go run ./cmd/server -addr :9000 -cache-ttl 1m
+//
+// The server must be run from the BookCabin/ project root because it reads
+// mock data from test/testdata/ relative to the working directory.
 package main
 
 import (

@@ -10,6 +10,8 @@ import (
 	"bookcabin/internal/pkg/domain"
 )
 
+// Lion is the [Provider] adapter for Lion Air.
+// BaseURL must be the base URL of the Lion Air mock server (e.g. "http://127.0.0.1:PORT").
 type Lion struct{ BaseURL string }
 
 func (Lion) Name() string { return "Lion Air" }

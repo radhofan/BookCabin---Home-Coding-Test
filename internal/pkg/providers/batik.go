@@ -13,6 +13,8 @@ import (
 	"bookcabin/internal/pkg/domain"
 )
 
+// Batik is the [Provider] adapter for Batik Air.
+// BaseURL must be the base URL of the Batik Air mock server (e.g. "http://127.0.0.1:PORT").
 type Batik struct{ BaseURL string }
 
 func (Batik) Name() string { return "Batik Air" }

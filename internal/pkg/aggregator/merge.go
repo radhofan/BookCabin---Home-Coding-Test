@@ -2,6 +2,10 @@ package aggregator
 
 import "bookcabin/internal/pkg/domain"
 
+// Dedup collapses flights that represent the same physical service — identified
+// by airline IATA code, flight number, and departure day — keeping only the
+// cheapest option across providers. This satisfies the requirement to compare
+// prices for the same flight across different sources.
 func Dedup(flights []domain.Flight) []domain.Flight {
 	type key struct {
 		code   string
