@@ -2,7 +2,6 @@ package providers
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -11,10 +10,7 @@ import (
 	"bookcabin/internal/pkg/domain"
 )
 
-//go:embed testdata/lion.json
-var lionRaw []byte
-
-type Lion struct{}
+type Lion struct{ BaseURL string }
 
 func (Lion) Name() string { return "Lion Air" }
 
@@ -72,11 +68,12 @@ type lionFlight struct {
 }
 
 func (l *Lion) Fetch(ctx context.Context, req domain.SearchRequest) ([]domain.Flight, error) {
-	if err := simulate(ctx, 100*time.Millisecond, 200*time.Millisecond); err != nil {
-		return nil, err
+	body, err := httpGet(ctx, l.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("lion: %w", err)
 	}
 	var resp lionResp
-	if err := json.Unmarshal(lionRaw, &resp); err != nil {
+	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("lion decode: %w", err)
 	}
 	out := make([]domain.Flight, 0, len(resp.Data.Available))

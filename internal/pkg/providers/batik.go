@@ -2,7 +2,6 @@ package providers
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -14,10 +13,7 @@ import (
 	"bookcabin/internal/pkg/domain"
 )
 
-//go:embed testdata/batik.json
-var batikRaw []byte
-
-type Batik struct{}
+type Batik struct{ BaseURL string }
 
 func (Batik) Name() string { return "Batik Air" }
 
@@ -55,11 +51,12 @@ type batikFlight struct {
 }
 
 func (b *Batik) Fetch(ctx context.Context, req domain.SearchRequest) ([]domain.Flight, error) {
-	if err := simulate(ctx, 200*time.Millisecond, 400*time.Millisecond); err != nil {
-		return nil, err
+	body, err := httpGet(ctx, b.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("batik: %w", err)
 	}
 	var resp batikResp
-	if err := json.Unmarshal(batikRaw, &resp); err != nil {
+	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("batik decode: %w", err)
 	}
 	if resp.Code != 200 {

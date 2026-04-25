@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"log"
@@ -23,8 +22,13 @@ func main() {
 	cacheTTL := flag.Duration("cache-ttl", 30*time.Second, "search result TTL")
 	flag.Parse()
 
+	urls, err := startAirlineServers()
+	if err != nil {
+		log.Fatalf("airline servers: %v", err)
+	}
+
 	cfg := aggregator.DefaultConfig()
-	agg := aggregator.New(cfg, providers.All())
+	agg := aggregator.New(cfg, providers.All(urls))
 	c := cache.New(*cacheTTL)
 	svc := service.New(agg, c)
 	h := api.New(svc)
@@ -40,11 +44,8 @@ func main() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		<-sig
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(ctx); err != nil {
-			log.Printf("shutdown: %v", err)
-		}
+		log.Println("shutting down...")
+		srv.Close()
 		close(idleClosed)
 	}()
 

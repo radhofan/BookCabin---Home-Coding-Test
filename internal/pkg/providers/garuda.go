@@ -2,7 +2,6 @@ package providers
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -11,10 +10,7 @@ import (
 	"bookcabin/internal/pkg/domain"
 )
 
-//go:embed testdata/garuda.json
-var garudaRaw []byte
-
-type Garuda struct{}
+type Garuda struct{ BaseURL string }
 
 func (Garuda) Name() string { return "Garuda Indonesia" }
 
@@ -39,15 +35,15 @@ type garudaSegment struct {
 }
 
 type garudaFlight struct {
-	FlightID    string         `json:"flight_id"`
-	Airline     string         `json:"airline"`
-	AirlineCode string         `json:"airline_code"`
-	Departure   garudaEndpoint `json:"departure"`
-	Arrival     garudaEndpoint `json:"arrival"`
-	DurationMinutes int        `json:"duration_minutes"`
-	Stops       int            `json:"stops"`
-	Aircraft    string         `json:"aircraft"`
-	Price       struct {
+	FlightID        string         `json:"flight_id"`
+	Airline         string         `json:"airline"`
+	AirlineCode     string         `json:"airline_code"`
+	Departure       garudaEndpoint `json:"departure"`
+	Arrival         garudaEndpoint `json:"arrival"`
+	DurationMinutes int            `json:"duration_minutes"`
+	Stops           int            `json:"stops"`
+	Aircraft        string         `json:"aircraft"`
+	Price           struct {
 		Amount   int64  `json:"amount"`
 		Currency string `json:"currency"`
 	} `json:"price"`
@@ -62,11 +58,12 @@ type garudaFlight struct {
 }
 
 func (g *Garuda) Fetch(ctx context.Context, req domain.SearchRequest) ([]domain.Flight, error) {
-	if err := simulate(ctx, 50*time.Millisecond, 100*time.Millisecond); err != nil {
-		return nil, err
+	body, err := httpGet(ctx, g.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("garuda: %w", err)
 	}
 	var resp garudaResp
-	if err := json.Unmarshal(garudaRaw, &resp); err != nil {
+	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("garuda decode: %w", err)
 	}
 	out := make([]domain.Flight, 0, len(resp.Flights))
@@ -89,8 +86,6 @@ func normalizeGaruda(f garudaFlight) (domain.Flight, error) {
 	stops := f.Stops
 	totalMins := f.DurationMinutes
 
-	// When segments are present, top-level arrival may only be the first hop.
-	// Rebuild from the segment chain to get the real final destination.
 	if len(f.Segments) > 1 {
 		dep = f.Segments[0].Departure
 		arr = f.Segments[len(f.Segments)-1].Arrival

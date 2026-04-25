@@ -7,17 +7,53 @@ schema, and exposes the result over HTTP.
 ## Requirements
 
 - Go 1.22+
+- [jq](https://jqlang.github.io/jq/) (for pretty-printing API responses, optional)
+
+```bash
+scoop install jq        # Windows (Scoop)
+brew install jq         # macOS
+sudo apt install jq     # Ubuntu/Debian
+```
 
 ## Run
 
 ```bash
-cd bookcabin
+cd BookCabin
 go mod tidy
-go run ./cmd/server           # listens on :8080
+go run ./cmd/server
+```
+
+On startup the server automatically launches four airline mock servers on
+random local ports and logs their addresses:
+
+```
+airline mock: Garuda Indonesia      http://127.0.0.1:54321
+airline mock: Lion Air              http://127.0.0.1:54322
+airline mock: Batik Air             http://127.0.0.1:54323
+airline mock: AirAsia               http://127.0.0.1:54324
+bookcabin listening on :8080
+```
+
+The main API is always on `:8080`. Airline servers pick free ports automatically
+so there are no port conflicts.
+
+Custom address or cache TTL:
+
+```bash
 go run ./cmd/server -addr :9000 -cache-ttl 1m
 ```
 
-Health check:
+**Important:** run from inside the `BookCabin/` directory. The server reads
+mock data from `test/testdata/` relative to the working directory.
+
+## API
+
+The backend exposes exactly two endpoints — nothing else.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/healthz` | Health check — returns `{"status":"ok"}` |
+| `POST` | `/search` | Flight search and aggregation |
 
 ```bash
 curl http://localhost:8080/healthz
@@ -25,48 +61,106 @@ curl http://localhost:8080/healthz
 
 ## Search
 
+### One-way search
+
+Returns all available flights from `origin` to `destination` on `departureDate`, normalized across all four providers.
+
+| Param | Description |
+|---|---|
+| `origin` | Departure airport IATA code |
+| `destination` | Arrival airport IATA code |
+| `departureDate` | Date in `YYYY-MM-DD` format |
+| `passengers` | Number of passengers (used to check seat availability) |
+| `cabinClass` | `economy`, `business`, `first`, or `premium_economy` |
+
 ```bash
-curl -s http://localhost:8080/search -X POST -H 'content-type: application/json' -d '{
-  "origin": "CGK",
-  "destination": "DPS",
-  "departureDate": "2025-12-15",
-  "passengers": 1,
-  "cabinClass": "economy"
-}' | jq
+curl -s -X POST http://localhost:8080/search -H "content-type: application/json" -d "{\"origin\":\"CGK\",\"destination\":\"DPS\",\"departureDate\":\"2025-12-15\",\"passengers\":1,\"cabinClass\":\"economy\"}" | jq
 ```
 
 ### With filters and sort
 
+Narrows results after aggregation and controls sort order — all filter/sort params are optional.
+
+| Param | Description |
+|---|---|
+| `filters.max_price` | Drop flights above this IDR amount |
+| `filters.max_stops` | `0` = direct only, `1` = max one stop, etc. |
+| `filters.airlines` | Whitelist of airline IATA codes |
+| `filters.departure_window` | Only flights departing between `from_hour` and `to_hour` (24h) |
+| `sort_by` | `price`, `duration`, `departure_time`, `arrival_time`, or `best_value` |
+| `sort_order` | `asc` or `desc` |
+
 ```bash
-curl -s http://localhost:8080/search -X POST -H 'content-type: application/json' -d '{
-  "origin": "CGK",
-  "destination": "DPS",
-  "departureDate": "2025-12-15",
-  "passengers": 1,
-  "cabinClass": "economy",
-  "filters": {
-    "max_price": 1000000,
-    "max_stops": 0,
-    "airlines": ["GA", "JT"],
-    "departure_window": { "from_hour": 6, "to_hour": 12 }
-  },
-  "sort_by": "best_value",
-  "sort_order": "asc"
-}' | jq
+curl -s -X POST http://localhost:8080/search -H "content-type: application/json" -d "{\"origin\":\"CGK\",\"destination\":\"DPS\",\"departureDate\":\"2025-12-15\",\"passengers\":1,\"cabinClass\":\"economy\",\"filters\":{\"max_price\":1000000,\"max_stops\":0,\"airlines\":[\"GA\",\"JT\"],\"departure_window\":{\"from_hour\":6,\"to_hour\":12}},\"sort_by\":\"best_value\",\"sort_order\":\"asc\"}" | jq
 ```
 
 ### Round-trip
 
+Same as one-way but also fetches the return leg — response contains both `outbound` and `inbound` flight arrays.
+
+| Param | Description |
+|---|---|
+| `returnDate` | Return date in `YYYY-MM-DD` format |
+
 ```bash
-curl -s http://localhost:8080/search -X POST -H 'content-type: application/json' -d '{
-  "origin": "CGK",
-  "destination": "DPS",
-  "departureDate": "2025-12-15",
-  "returnDate": "2025-12-20",
-  "passengers": 1,
-  "cabinClass": "economy"
-}' | jq
+curl -s -X POST http://localhost:8080/search -H "content-type: application/json" -d "{\"origin\":\"CGK\",\"destination\":\"DPS\",\"departureDate\":\"2025-12-15\",\"returnDate\":\"2025-12-20\",\"passengers\":1,\"cabinClass\":\"economy\"}" | jq
 ```
+
+### POST /search — full parameter reference
+
+#### Top-level fields
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `origin` | string | yes | Departure airport IATA code (e.g. `"CGK"`) |
+| `destination` | string | yes | Arrival airport IATA code (e.g. `"DPS"`) |
+| `departureDate` | string | yes | Date in `YYYY-MM-DD` format |
+| `returnDate` | string | no | Return date in `YYYY-MM-DD`. Omit or set `null` for one-way |
+| `passengers` | int | yes | Number of passengers (must be ≥ 1) |
+| `cabinClass` | string | yes | See cabin class options below. Defaults to `economy` if omitted |
+| `filters` | object | no | See filters below. Omit the whole object to skip filtering |
+| `sort_by` | string | no | See sort options below. Defaults to `price` |
+| `sort_order` | string | no | `asc` or `desc`. Defaults to `asc` |
+
+#### `cabinClass` options
+
+| Value | Description |
+|---|---|
+| `economy` | Economy class |
+| `premium_economy` | Premium economy |
+| `business` | Business class |
+| `first` | First class |
+
+#### `filters` fields
+
+All filter fields are optional. Omit any field to skip that filter.
+
+| Field | Type | Description |
+|---|---|---|
+| `min_price` | int | Drop flights cheaper than this IDR amount |
+| `max_price` | int | Drop flights more expensive than this IDR amount |
+| `max_stops` | int | `0` = direct only, `1` = max one stop, `2` = max two stops, etc. |
+| `airlines` | string[] | Whitelist by IATA code (e.g. `["GA", "JT"]`) or full name. Only matching airlines are returned |
+| `max_duration_minutes` | int | Drop flights with total duration longer than this |
+| `departure_window` | object | Only flights departing within the hour range — see below |
+| `arrival_window` | object | Only flights arriving within the hour range — see below |
+
+#### Time window fields (`departure_window` / `arrival_window`)
+
+| Field | Type | Description |
+|---|---|---|
+| `from_hour` | int | Start of window, 24h format (0–23) |
+| `to_hour` | int | End of window, 24h format (0–23). Wraps midnight if `to_hour` < `from_hour` |
+
+#### `sort_by` options
+
+| Value | Description |
+|---|---|
+| `price` | Sort by ticket price (default) |
+| `duration` | Sort by total flight duration |
+| `departure_time` | Sort by departure timestamp |
+| `arrival_time` | Sort by arrival timestamp |
+| `best_value` | Sort by composite score: price 60%, duration 30%, stops 10% |
 
 ## Tests
 
@@ -77,26 +171,47 @@ go test -race ./...
 
 ## Layout
 
+Follows the [golang-standards/project-layout](https://github.com/golang-standards/project-layout) convention.
+
 ```
-cmd/server/          HTTP entry point
-internal/domain/     unified Flight/SearchRequest models + validation
-internal/airport/    airport → city/TZ lookup
-internal/providers/  4 provider adapters, each with its own normalizer
-internal/aggregator/ parallel fanout, exp-backoff retry, token-bucket rate limit, dedup
-internal/filter/     price/stops/airline/duration/time-window filters + sort
-internal/ranker/     "best value" scoring
-internal/cache/      TTL in-memory cache keyed on search params
-internal/service/    orchestrator
-internal/api/        HTTP handler
-internal/money/      IDR formatting
+cmd/server/               entry point — starts airline mock servers + main API
+internal/pkg/airlinemock/ HTTP handlers that simulate each airline (delay, failures)
+internal/pkg/providers/   HTTP clients for each airline + normalization logic
+internal/pkg/aggregator/  parallel fanout, exp-backoff retry, token-bucket rate limit, dedup
+internal/pkg/filter/      price/stops/airline/duration/time-window filters + sort
+internal/pkg/ranker/      "best value" scoring
+internal/pkg/cache/       TTL in-memory cache keyed on search params
+internal/pkg/domain/      unified Flight/SearchRequest models + validation
+internal/pkg/airport/     airport → city/TZ lookup
+internal/pkg/money/       IDR formatting
+internal/app/service/     orchestrator
+internal/app/api/         HTTP handler
+test/testdata/            mock airline JSON responses + assignment PDF
 ```
+
+## How the mock airline servers work
+
+Each airline runs as a real HTTP server in the same process on a random port.
+The providers call them over localhost HTTP — no shared memory, no function
+calls. This mirrors a real multi-service architecture.
+
+| Airline          | Simulated latency | Failure rate |
+|------------------|-------------------|--------------|
+| Garuda Indonesia | 50–100 ms         | none         |
+| Lion Air         | 100–200 ms        | none         |
+| Batik Air        | 200–400 ms        | none         |
+| AirAsia          | 50–150 ms         | 10%          |
+
+AirAsia failures return HTTP 503. The aggregator retries with exponential
+backoff (2 attempts, full jitter), so transient failures are recovered
+automatically.
 
 ## Design notes
 
 **Separation of concerns.** Each layer has one job: providers fetch+normalize,
 aggregator handles fan-out and transient failures, filter/sort/rank operate on
 the unified model, service orchestrates, API translates HTTP. A new provider
-needs one file in `internal/providers/`; nothing else changes.
+needs one file in `internal/pkg/providers/`; nothing else changes.
 
 **Data inconsistency handling.** Each provider ships its own time format:
 - AirAsia: RFC3339 with colon offset (`+07:00`)
@@ -154,16 +269,5 @@ localized string (`"Rp 1.250.000"`).
 - Parallel provider queries with timeout
 - Graceful HTTP shutdown
 
-Not implemented: multi-city search (the single-leg model covers it naturally
+Note: multi-city search (the single-leg model covers it naturally
 as a sequence of one-way searches but the API surface isn't exposed).
-
-## Sample request/response shapes
-
-Request body (one-way):
-
-```json
-{ "origin": "CGK", "destination": "DPS", "departureDate": "2025-12-15", "passengers": 1, "cabinClass": "economy" }
-```
-
-Response is wrapped in `{ "outbound": ..., "inbound": ... }` (inbound omitted
-for one-way). Each leg matches the unified schema in the task spec.

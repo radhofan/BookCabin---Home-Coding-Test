@@ -3,8 +3,10 @@ package providers
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
-	"time"
 
 	"bookcabin/internal/pkg/domain"
 )
@@ -19,11 +21,29 @@ func req() domain.SearchRequest {
 	}
 }
 
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return b
+}
+
+func jsonServer(t *testing.T, data []byte) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
 func TestGaruda_FiltersAndNormalizes(t *testing.T) {
-	g := &Garuda{}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	got, err := g.Fetch(ctx, req())
+	srv := jsonServer(t, mustReadFile(t, "testdata/garuda.json"))
+	g := &Garuda{BaseURL: srv.URL}
+	got, err := g.Fetch(context.Background(), req())
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
 	}
@@ -41,7 +61,8 @@ func TestGaruda_FiltersAndNormalizes(t *testing.T) {
 }
 
 func TestGaruda_MultiSegmentRecomputesArrival(t *testing.T) {
-	g := &Garuda{}
+	srv := jsonServer(t, mustReadFile(t, "testdata/garuda.json"))
+	g := &Garuda{BaseURL: srv.URL}
 	got, err := g.Fetch(context.Background(), req())
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
@@ -68,7 +89,8 @@ func TestGaruda_MultiSegmentRecomputesArrival(t *testing.T) {
 }
 
 func TestLion_HandlesNamedTimezone(t *testing.T) {
-	l := &Lion{}
+	srv := jsonServer(t, mustReadFile(t, "testdata/lion.json"))
+	l := &Lion{BaseURL: srv.URL}
 	got, err := l.Fetch(context.Background(), req())
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
@@ -87,7 +109,8 @@ func TestLion_HandlesNamedTimezone(t *testing.T) {
 }
 
 func TestBatik_HandlesCompactOffset(t *testing.T) {
-	b := &Batik{}
+	srv := jsonServer(t, mustReadFile(t, "testdata/batik.json"))
+	b := &Batik{BaseURL: srv.URL}
 	got, err := b.Fetch(context.Background(), req())
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
@@ -103,7 +126,11 @@ func TestBatik_HandlesCompactOffset(t *testing.T) {
 }
 
 func TestAirAsia_FailureRate(t *testing.T) {
-	a := &AirAsia{FailureRate: 1.0}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "provider unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+	a := &AirAsia{BaseURL: srv.URL}
 	_, err := a.Fetch(context.Background(), req())
 	if err == nil {
 		t.Fatal("expected failure")
@@ -113,8 +140,9 @@ func TestAirAsia_FailureRate(t *testing.T) {
 	}
 }
 
-func TestAirAsia_NeverFailsAt0(t *testing.T) {
-	a := &AirAsia{FailureRate: -1}
+func TestAirAsia_NeverFails(t *testing.T) {
+	srv := jsonServer(t, mustReadFile(t, "testdata/airasia.json"))
+	a := &AirAsia{BaseURL: srv.URL}
 	got, err := a.Fetch(context.Background(), req())
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)

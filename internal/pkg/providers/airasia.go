@@ -2,22 +2,15 @@ package providers
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"time"
 
 	"bookcabin/internal/pkg/airport"
 	"bookcabin/internal/pkg/domain"
 )
 
-//go:embed testdata/airasia.json
-var airasiaRaw []byte
-
-type AirAsia struct {
-	FailureRate float64
-}
+type AirAsia struct{ BaseURL string }
 
 func (AirAsia) Name() string { return "AirAsia" }
 
@@ -46,19 +39,12 @@ type airasiaFlight struct {
 }
 
 func (a *AirAsia) Fetch(ctx context.Context, req domain.SearchRequest) ([]domain.Flight, error) {
-	fail := a.FailureRate
-	if fail == 0 {
-		fail = 0.10
-	}
-	if rand.Float64() < fail {
-		_ = simulate(ctx, 50*time.Millisecond, 150*time.Millisecond)
-		return nil, fmt.Errorf("airasia: %w", ErrProviderUnavailable)
-	}
-	if err := simulate(ctx, 50*time.Millisecond, 150*time.Millisecond); err != nil {
-		return nil, err
+	body, err := httpGet(ctx, a.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("airasia: %w", err)
 	}
 	var resp airasiaResp
-	if err := json.Unmarshal(airasiaRaw, &resp); err != nil {
+	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("airasia decode: %w", err)
 	}
 	out := make([]domain.Flight, 0, len(resp.Flights))
