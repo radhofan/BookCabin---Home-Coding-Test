@@ -224,3 +224,73 @@ automatically.
 **Graceful shutdown.** The main server listens for `SIGINT` / `SIGTERM` and calls `srv.Close()`, allowing in-flight requests to drain before the process exits.
 
 **Not implemented:** multi-city search. The single-leg model naturally supports it as a sequence of one-way searches, but the API surface to express an arbitrary city chain is not exposed.
+
+## Sample response
+
+```bash
+curl -s -X POST http://localhost:8080/search -H "content-type: application/json" -d "{\"origin\":\"CGK\",\"destination\":\"DPS\",\"departureDate\":\"2025-12-15\",\"passengers\":1,\"cabinClass\":\"economy\"}" | jq
+```
+
+One-way search CGK → DPS, 13 flights returned (one shown for simplicity).
+
+```json
+{
+  "search_criteria": {
+    "origin": "CGK",
+    "destination": "DPS",
+    "departure_date": "2025-12-15",
+    "passengers": 1,
+    "cabin_class": "economy"
+  },
+  "metadata": {
+    "total_results": 13,
+    "providers_queried": 4,
+    "providers_succeeded": 4,
+    "providers_failed": 0,
+    "search_time_ms": 311,
+    "cache_hit": false
+  },
+  "flights": [
+    {
+      "id": "QZ532_AirAsia",
+      "provider": "AirAsia",
+      "airline": {
+        "name": "AirAsia",
+        "code": "QZ"
+      },
+      "flight_number": "QZ532",
+      "departure": {
+        "airport": "CGK",
+        "city": "Jakarta",
+        "datetime": "2025-12-15T19:30:00+07:00",
+        "timestamp": 1765801800
+      },
+      "arrival": {
+        "airport": "DPS",
+        "city": "Denpasar",
+        "datetime": "2025-12-15T22:10:00+08:00",
+        "timestamp": 1765807800
+      },
+      "duration": {
+        "total_minutes": 100,
+        "formatted": "1h 40m"
+      },
+      "stops": 0,
+      "price": {
+        "amount": 595000,
+        "currency": "IDR",
+        "formatted": "Rp 595.000",
+        "best_value_score": 0.9516
+      },
+      "available_seats": 72,
+      "cabin_class": "economy",
+      "aircraft": null,
+      "amenities": [],
+      "baggage": {
+        "carry_on": "Cabin baggage only",
+        "checked": "Additional fee"
+      }
+    }
+  ]
+}
+```
